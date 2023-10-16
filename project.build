@@ -73,11 +73,10 @@ cmake_definition+= -DCONFIG_COREDUMP=$(CONFIG_COREDUMP)
 build:Makefile
 	$(CMAKE) -S . -B build -G $(cmake_generator) $(cmake_definition)
 	$(MAKE) -C build -j8
-	$(MAKE) -C build combine
 
 ninja:Makefile
 	$(CMAKE) -S . -B build -G Ninja $(cmake_definition)
-	cd build && ninja && ninja combine
+	cd build && ninja
 
 clean::
 	$(RM) build
