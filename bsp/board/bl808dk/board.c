@@ -298,7 +298,7 @@ void board_init(void)
     /* D0 boot from 0x58000000 */
     GLB_Set_CPU_Reset_Address(GLB_CORE_ID_D0, 0x58000000);
     /* D0 image offset on flash is CONFIG_D0_FLASH_ADDR+0x1000(header) */
-    bflb_sf_ctrl_set_flash_image_offset(CONFIG_D0_FLASH_ADDR + 0x1000, 1, SF_CTRL_FLASH_BANK0);
+    bflb_sf_ctrl_set_flash_image_offset(CONFIG_D0_FLASH_ADDR, 1, SF_CTRL_FLASH_BANK0);
 
     Tzc_Sec_Set_CPU_Group(GLB_CORE_ID_LP, 0);
     /* LP boot from 0x58020000 */

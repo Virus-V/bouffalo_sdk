@@ -38,7 +38,7 @@ SECTIONS
         . = ALIGN(4);
         __text_code_start__ = .;
 
-        KEEP(*startup*.*o(*.text*))
+        KEEP(*start*.*o(*.init*))
         KEEP (*(SORT_NONE(_start)))
         KEEP (*(SORT_NONE(Reset_Handler)))
 
