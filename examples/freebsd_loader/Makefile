@@ -6,7 +6,7 @@ CHIP ?= bl808
 all: $(build_dirs)
 
 $(build_dirs):
-	make -C $@ ninja
+	$(MAKE) -C $@ ninja
 
 clean::
 	find . -name "build" | xargs rm -rf
