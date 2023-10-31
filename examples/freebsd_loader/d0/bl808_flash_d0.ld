@@ -1,0 +1,235 @@
+/****************************************************************************************
+* @file flash.ld
+*
+* @brief This file is the link script file (gnuarm or armgcc).
+*
+* Copyright (C) BouffaloLab 2021
+*
+****************************************************************************************
+*/
+
+/* configure the CPU type */
+OUTPUT_ARCH( "riscv" )
+/* link with the standard c library */
+INPUT(-lc)
+/* link with the standard GCC library */
+INPUT(-lgcc)
+/* configure the entry point */
+ENTRY(__start)
+
+StackSize    = 0x1000; /*  1KB */
+HeapMinSize  = 0x1000; /*  4KB */
+
+MEMORY
+{
+    xip_memory  (rx)  : ORIGIN = 0x58000000, LENGTH = 1M
+    ram_memory (rx)  : ORIGIN = 0x3effc000, LENGTH = 17K + 31K + 32K
+    xram_memory (!rx) : ORIGIN = 0x40004000, LENGTH = 16K
+}
+
+SECTIONS
+{
+    PROVIDE(__metal_chicken_bit = 0);
+
+    .text :
+    {
+        . = ALIGN(4);
+        __text_code_start__ = .;
+
+        KEEP(*start*.*o(*.init*))
+        KEEP (*(SORT_NONE(_start)))
+        KEEP (*(SORT_NONE(Reset_Handler)))
+
+        /* section information for shell */
+        . = ALIGN(4);
+        __fsymtab_start = .;
+        KEEP(*(FSymTab))
+        __fsymtab_end = .;
+
+        . = ALIGN(4);
+        __vsymtab_start = .;
+        KEEP(*(VSymTab))
+        __vsymtab_end = .;
+
+        /* section information for usb desc */
+        . = ALIGN(4);
+        _usb_desc_start = .;
+        KEEP(*(usb_desc))
+        . = ALIGN(4);
+        _usb_desc_end = .;
+
+        *(.text)
+        *(.text.*)
+
+        /*put .rodata**/
+        *(EXCLUDE_FILE( *bl808_glb*.o* \
+                        *bl808_pds*.o* \
+                        *bl808_common*.o* \
+                        *bl808_sf_cfg*.o* \
+                        *bl808_sf_ctrl*.o* \
+                        *bl808_sflash*.o* \
+                        *bl808_xip_sflash*.o* \
+                        *bl808_ef_ctrl*.o* \
+                        *bl808_sf_cfg_ext*.o* \
+                        *bl808_sflash_ext*.o* \
+                        *bl808_xip_sflash_ext*.o*) .rodata*)
+        *(.rodata)
+        *(.rodata.*)
+
+        *(.srodata)
+        *(.srodata.*)
+
+        . = ALIGN(4);
+        __text_code_end__ = .;
+    } > xip_memory
+
+
+    .itcm_region :
+    {
+        . = ALIGN(4);
+        __tcm_code_start__ = .;
+        PROVIDE (__itcm_load_addr = LOADADDR(.itcm_region));
+
+        *(.tcm_code.*)
+        *(.tcm_const.*)
+        *(.sclock_rlt_code.*)
+        *(.sclock_rlt_const.*)
+
+        *bl808_glb*.o*(.rodata*)
+        *bl808_pds*.o*(.rodata*)
+        *bl808_common*.o*(.rodata*)
+        *bl808_sf_cfg*.o*(.rodata*)
+        *bl808_sf_ctrl*.o*(.rodata*)
+        *bl808_sflash*.o*(.rodata*)
+        *bl808_xip_sflash*.o*(.rodata*)
+        *bl808_ef_ctrl*.o*(.rodata*)
+
+        . = ALIGN(4);
+        __tcm_code_end__ = .;
+    } > ram_memory AT > xip_memory
+
+    .dtcm_region :
+    {
+        . = ALIGN(4);
+        __tcm_data_start__ = .;
+        PROVIDE (__dtcm_load_addr = LOADADDR(.dtcm_region));
+
+        *(.tcm_data)
+        /* *finger_print.o(.data*) */
+
+        . = ALIGN(4);
+        __tcm_data_end__ = .;
+    } > ram_memory AT > xip_memory
+
+    /*************************************************************************/
+    /* .stack_dummy section doesn't contains any symbols. It is only
+     * used for linker to calculate size of stack sections, and assign
+     * values to stack symbols later */
+    .stack_dummy (NOLOAD):
+    {
+        . = ALIGN(0x4);
+        . = . + StackSize;
+        . = ALIGN(0x80);
+
+        /* Set stack top to end of RAM, and stack limit move down by
+         * size of stack_dummy section */
+        __StackTop = .;
+        PROVIDE( __freertos_irq_stack_top = __StackTop);
+    } > ram_memory
+
+    __StackLimit = __StackTop - SIZEOF(.stack_dummy);
+
+    /* Check if data + heap + stack exceeds RAM limit */
+    ASSERT(__StackLimit >= __tcm_data_end__, "region RAM overflowed with stack")
+    /*************************************************************************/
+
+    .system_ram_data_region :
+    {
+        . = ALIGN(4);
+        __system_ram_data_start__ = .;
+        PROVIDE(__system_ram_load_addr = LOADADDR(.system_ram_data_region));
+
+        *(.system_ram)
+
+        . = ALIGN(4);
+        __system_ram_data_end__ = .;
+    } > ram_memory AT > xip_memory
+
+    .system_ram_noinit_data_region (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.system_ram_noinit)
+
+        . = ALIGN(4);
+    } > ram_memory
+
+    /* Data section */
+    RAM_DATA :
+    {
+        . = ALIGN(4);
+        __ram_data_start__ = .;
+        PROVIDE(__ram_load_addr = LOADADDR(RAM_DATA));
+
+        PROVIDE( __global_pointer$ = . + 0x800 );
+
+        *(.data)
+        *(.data.*)
+        *(.sdata)
+        *(.sdata.*)
+        *(.sdata2)
+        *(.sdata2.*)
+
+        . = ALIGN(4);
+        __ram_data_end__ = .;
+    } > ram_memory AT > xip_memory
+
+    .kernel_mark :
+    {
+      . = ALIGN(32);
+      LONG(0x5746504C); /* LPFW */
+      . = ALIGN(32);
+      PROVIDE( __mark_start = . );
+      ASSERT(((ABSOLUTE(__mark_start) & 0x1F) == 0), "Kernel not aligned 32!");
+    } > xip_memory
+
+    .bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __bss_start__ = .;
+
+        *(.bss*)
+        *(.sbss*)
+        *(COMMON)
+
+        . = ALIGN(4);
+        __bss_end__ = .;
+    } > ram_memory
+
+    .noinit_data (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __noinit_data_start__ = .;
+
+        *(.noinit_data*)
+
+        . = ALIGN(4);
+        __noinit_data_end__ = .;
+    } > ram_memory
+
+    .heap (NOLOAD):
+    {
+        . = ALIGN(4);
+        __HeapBase = .;
+
+        /*__end__ = .;*/
+        /*end = __end__;*/
+        KEEP(*(.heap*))
+
+        . = ALIGN(4);
+        __HeapLimit = .;
+    } > ram_memory
+
+    __HeapLimit = ORIGIN(ram_memory) + LENGTH(ram_memory);
+    ASSERT(__HeapLimit - __HeapBase >= HeapMinSize, "heap region overflow")
+
+}

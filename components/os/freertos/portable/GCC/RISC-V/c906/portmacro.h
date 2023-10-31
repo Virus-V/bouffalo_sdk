@@ -180,11 +180,10 @@ definition is found. */
 	#error configMTIME_BASE_ADDRESS and configMTIMECMP_BASE_ADDRESS must be defined in FreeRTOSConfig.h.  Set them to zero if there is no MTIME (machine time) clock.  See https://www.freertos.org/Using-FreeRTOS-on-RISC-V.html
 #endif
 
-
+extern BaseType_t TrapNetCounter;
 portFORCE_INLINE static BaseType_t xPortIsInsideInterrupt( void )
 {
-    extern uint64_t g_irq_nested_level;
-    return g_irq_nested_level ? 1 : 0;
+    return TrapNetCounter ? 1 : 0;
 }
 
 #ifdef __cplusplus
@@ -192,4 +191,3 @@ portFORCE_INLINE static BaseType_t xPortIsInsideInterrupt( void )
 #endif
 
 #endif /* PORTMACRO_H */
-

@@ -3,6 +3,9 @@
 #include "bl808_glb.h"
 
 #include <stdint.h>
+#include <rpmsg_lite.h>
+#include <rpmsg_ns.h>
+#include <rpmsg_queue.h>
 
 #include <FreeRTOS.h>
 #include "semphr.h"
@@ -10,84 +13,180 @@
 #define DBG_TAG "MAIN"
 #include "log.h"
 
-static TaskHandle_t consumer_handle;
-static TaskHandle_t producer_handle;
+struct rpmsg_lite_instance *ipc_rpmsg;
+struct rpmsg_lite_endpoint *ipc_rpmsg_default_endpoint;
 
-uint8_t sharedBuf[16];
-SemaphoreHandle_t sem_empty = NULL;
-SemaphoreHandle_t sem_full = NULL;
-SemaphoreHandle_t mtx_lock = NULL;
+rpmsg_ns_handle ipc_rpmsg_ns;
+rpmsg_queue_handle ipc_rpmsg_queue;
 
-static void consumer_task(void *pvParameters)
+void ipc_m0_callback(uint32_t src)
 {
-    LOG_I("Consumer task enter \r\n");
-    vTaskDelay(1000);
-    LOG_I("Consumer task start \r\n");
-    LOG_I("begin to loop %s\r\n", __FILE__);
+    //LOG_I("IPC: MO Callback %x\r\n", src);
+    switch (ffs(src) - 1) {
+        case IPC_MSG_PING:
+            break;
+        case IPC_MSG_PONG:
+            /* nothing todo */
+            break;
+        case IPC_MSG_RPMSG0:
+        case IPC_MSG_RPMSG1:
+        case IPC_MSG_RPMSG2:
+        case IPC_MSG_RPMSG3:
+            /* env_isr is in the porting layer of rpmsg-lite */
+            LOG_D("IPC: Got Notify for Vector %d\r\n", ffs(src) - IPC_MSG_RPMSG0 - 1);
+            env_isr(ffs(src) - IPC_MSG_RPMSG0 - 1);
+            break;
+    }
+}
+
+void ipc_d0_callback(uint32_t src)
+{
+    //LOG_I("IPC: D0 Callback %x %x\r\n", src, ffs(src));
+    switch (ffs(src) - 1) {
+        case IPC_MSG_PING:
+            break;
+        case IPC_MSG_PONG:
+            /* nothing todo */
+            break;
+        case IPC_MSG_RPMSG0:
+        case IPC_MSG_RPMSG1:
+        case IPC_MSG_RPMSG2:
+        case IPC_MSG_RPMSG3:
+            /* env_isr is in the porting layer of rpmsg-lite */
+            LOG_D("IPC: Got Notify for Vector %d\r\n", ffs(src) - IPC_MSG_RPMSG0 - 1);
+            env_isr(ffs(src) - IPC_MSG_RPMSG0 - 1);
+            break;
+    }
+}
+
+void ipc_lp_callback(uint32_t src)
+{
+    //LOG_D("IPC: LP Callback %x\r\n", src);
+    switch (ffs(src) - 1) {
+        case IPC_MSG_PING:
+            break;
+        case IPC_MSG_PONG:
+            /* nothing todo */
+            break;
+        case IPC_MSG_RPMSG0:
+        case IPC_MSG_RPMSG1:
+        case IPC_MSG_RPMSG2:
+        case IPC_MSG_RPMSG3:
+            env_isr(ffs(src) - IPC_MSG_RPMSG0 - 1);
+            break;
+    }
+}
+
+void ipc_rpmsg_ns_callback(uint32_t new_ept, const char *new_ept_name, uint32_t flags, void *user_data)
+{
+    LOG_W("RPMSG TODO NS Callback Ran!\r\n");
+    LOG_W("Endpoint: %s - endpoint %d - flags %d\r\n", new_ept_name, new_ept, flags);
+}
+
+char rx_msg[64];
+static char helloMsg[128];
+
+int32_t rpmsg_bm_rx_cb(void *payload, uint32_t payload_len, uint32_t src, void *priv)
+{
+    //printf("payload: %p, %d, %d\r\n", payload, payload_len, src);
+    return RL_RELEASE;
+}
+
+void rpmsg_task(void *unused)
+{
+    volatile uint32_t remote_addr;
+    uint32_t size;
+
+    IPC_M0_Init(/* lp callback*/ ipc_lp_callback, /* d0 callback */ ipc_d0_callback);
+
+    ipc_rpmsg = rpmsg_lite_remote_init((uintptr_t *)XRAM_RINGBUF_ADDR, RL_PLATFORM_BL808_M0_LINK_ID, RL_NO_FLAGS);
+    LOG_D("rpmsg addr %lx, remaining %lx, total: %lx\r\n", ipc_rpmsg->sh_mem_base, ipc_rpmsg->sh_mem_remaining, ipc_rpmsg->sh_mem_total);
+
+    LOG_D("Waiting for RPMSG link up\r\n");
+
+    while (0 == rpmsg_lite_is_link_up(ipc_rpmsg)) {
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+
+    LOG_D("RPMSG link up\r\n");
+
+    ipc_rpmsg_ns = rpmsg_ns_bind(ipc_rpmsg, ipc_rpmsg_ns_callback, NULL);
+    if (ipc_rpmsg_ns == RL_NULL) {
+        LOG_W("Failed to bind RPMSG NS\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
+    printf("%s:%d\r\n", __func__, __LINE__);
+    LOG_D("RPMSG NS binded\r\n");
+
+    ipc_rpmsg_queue = rpmsg_queue_create(ipc_rpmsg);
+    printf("%s:%d\r\n", __func__, __LINE__);
+    if (ipc_rpmsg_queue == RL_NULL) {
+        LOG_W("Failed to create RPMSG queue\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    printf("%s:%d\r\n", __func__, __LINE__);
+#if 1
+    ipc_rpmsg_default_endpoint = rpmsg_lite_create_ept(ipc_rpmsg, 16, rpmsg_queue_rx_cb, ipc_rpmsg_queue);
+#else
+    ipc_rpmsg_default_endpoint = rpmsg_lite_create_ept(ipc_rpmsg, 16, rpmsg_bm_rx_cb, NULL);
+#endif
+    if (ipc_rpmsg_default_endpoint == RL_NULL) {
+        LOG_W("Failed to create RPMSG endpoint\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    printf("%s:%d\r\n", __func__, __LINE__);
+    LOG_D("RPMSG endpoint created\r\n");
+    /* Wait Hello handshake message from Remote Core. */
+    int32_t ret = rpmsg_queue_recv(ipc_rpmsg, ipc_rpmsg_queue, (uint32_t *)&remote_addr, helloMsg, sizeof(helloMsg), &size,
+                                   RL_BLOCK);
+    if (ret != RL_SUCCESS) {
+        LOG_D("rpmsg_queue_recv return %d\r\n", ret);
+    } else {
+        LOG_I("Got Hello message from remote core: %s %lx %d\r\n", helloMsg, remote_addr, size);
+        if (rpmsg_ns_announce(ipc_rpmsg, ipc_rpmsg_default_endpoint, "rpmsg-test", RL_NS_CREATE) != RL_SUCCESS) {
+            LOG_W("Failed to announce RPMSG NS\r\n");
+            vTaskDelete(NULL);
+            return;
+        }
+    }
+    printf("%s:%d\r\n", __func__, __LINE__);
 
     while (1) {
-        if (xSemaphoreTake(sem_full, portMAX_DELAY) == pdTRUE) {
-            xSemaphoreTake(mtx_lock, portMAX_DELAY);
-            LOG_I("Consumer get:%s\r\n", sharedBuf);
-            xSemaphoreGive(mtx_lock);
-            xSemaphoreGive(sem_empty);
-        } else {
-            LOG_I("Take sem_full fail\r\n");
+        if (rpmsg_queue_recv(ipc_rpmsg, ipc_rpmsg_queue, (uint32_t *)&remote_addr, rx_msg, sizeof(rx_msg), &size, RL_BLOCK) == RL_SUCCESS) {
+            //LOG_I("received %s - %lx!\r\n", rx_msg, remote_addr);
+            //strncpy(helloMsg, "Hello D0", sizeof(helloMsg));
+            //int ret = rpmsg_lite_send(ipc_rpmsg, ipc_rpmsg_default_endpoint, 0x10, (char *)helloMsg, sizeof(helloMsg), RL_BLOCK);
         }
+        //vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     vTaskDelete(NULL);
+    return;
 }
 
-static void producer_task(void *pvParameters)
+int main(void)
 {
-    uint8_t buf = 100;
+    TaskHandle_t rpmsg_task_handle = NULL;
+    board_init();
 
-    LOG_I("Producer task enter \r\n");
-    vTaskDelay(1000);
-    LOG_I("Producer task start \r\n");
+    LOG_I("E907 start...\r\n");
+    LOG_I("mtimer clk:%d; configCPU_CLOCK_HZ:%d\r\n", CPU_Get_MTimer_Clock(), configCPU_CLOCK_HZ);
 
-    while (1) {
-        if (xSemaphoreTake(sem_empty, portMAX_DELAY) == pdTRUE) {
-            xSemaphoreTake(mtx_lock, portMAX_DELAY);
-            buf++;
-            sprintf((char *)sharedBuf, "%d", buf);
-            LOG_I("Producer generates:%s\r\n", sharedBuf);
-            xSemaphoreGive(mtx_lock);
-            xSemaphoreGive(sem_full);
-            vTaskDelay(buf);
-        } else {
-            LOG_I("Take sem_empty fail\r\n");
-        }
+    configASSERT((configMAX_PRIORITIES > 4));
+
+    LOG_I("About to Start RPMSG Task\r\n");
+    if (xTaskCreate(rpmsg_task, "RPMSG_TASK", 2048 + 512, NULL, tskIDLE_PRIORITY + 1U, &rpmsg_task_handle) != pdPASS) {
+        printf("\r\nFailed to create rpmsg task\r\n");
+        return -1;
     }
 
-    vTaskDelete(NULL);
-}
+    vTaskStartScheduler();
 
-int main(void) {
-  board_init();
-
-  LOG_I("E907 start...\r\n");
-  LOG_I("mtimer clk:%d; configCPU_CLOCK_HZ:%d\r\n", CPU_Get_MTimer_Clock(), configCPU_CLOCK_HZ);
-
-  configASSERT((configMAX_PRIORITIES > 4));
-
-  /* Create semaphore */
-  vSemaphoreCreateBinary(sem_empty);
-  vSemaphoreCreateBinary(sem_full);
-  vSemaphoreCreateBinary(mtx_lock);
-
-  if (sem_empty == NULL || sem_full == NULL || mtx_lock == NULL) {
-      LOG_I("Create sem fail\r\n");
-  }
-
-  LOG_I("[OS] Starting consumer task...\r\n");
-  xTaskCreate(consumer_task, (char *)"consumer_task", 512, NULL, configMAX_PRIORITIES - 2, &consumer_handle);
-  LOG_I("[OS] Starting producer task...\r\n");
-  xTaskCreate(producer_task, (char *)"producer_task", 512, NULL, configMAX_PRIORITIES - 3, &producer_handle);
-
-  vTaskStartScheduler();
-
-  while (1) {
-  }
+    while (1) {
+    }
 }

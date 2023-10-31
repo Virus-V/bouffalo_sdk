@@ -37,6 +37,19 @@
 #include "bl808_ipc.h"
 #include "bflb_core.h"
 
+#undef BFLB_USE_HAL_DRIVER
+
+#ifndef BFLB_USE_HAL_DRIVER
+void IPC_M0_IRQHandler(void);
+#endif
+#ifndef BFLB_USE_HAL_DRIVER
+void IPC_LP_IRQHandler(void);
+#endif
+#ifndef BFLB_USE_HAL_DRIVER
+void IPC_D0_IRQHandler(void);
+#endif
+
+
 /** @addtogroup  BL606P_Peripheral_Driver
  *  @{
  */
@@ -205,7 +218,7 @@ void IPC_M0_Clear_Int_By_Word(uint32_t src)
  * @brief  CPUx trigger IPC interrupt to M0
  *
  * @param  src: IPC interrupt source
- * 
+ *
  * @param  cpuxOffset: CPU interrupt offset
  *
  * @return None
