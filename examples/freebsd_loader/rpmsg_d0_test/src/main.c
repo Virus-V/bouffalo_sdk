@@ -102,7 +102,7 @@ int main(void)
     uint64_t send_count = 0;
     while (1) {
       uint64_t now;
-      int ret = rpmsg_lite_send(ipc_rpmsg, ipc_rpmsg_default_endpoint, 16, (char *)helloMsg, sizeof(helloMsg), RL_BLOCK);
+      int ret = rpmsg_lite_send(ipc_rpmsg, ipc_rpmsg_default_endpoint, 17, (char *)helloMsg, sizeof(helloMsg), RL_BLOCK);
       if (ret == RL_SUCCESS) {
         send_count += sizeof(helloMsg);
 

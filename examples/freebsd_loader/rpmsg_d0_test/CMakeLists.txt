@@ -15,4 +15,4 @@ target_compile_options(app PRIVATE -ggdb -O0)
 
 sdk_set_main_file(src/main.c)
 sdk_set_linker_script(bl808_flash_d0.ld)
-project(ox64_coproc)
+project(rpmsg_d0_test)
