@@ -13,7 +13,7 @@
 #include "bl808_ipc.h"
 
 char rx_msg[64];
-static char helloMsg[128];
+static char helloMsg[64-16];
 
 struct rpmsg_lite_instance *ipc_rpmsg;
 struct rpmsg_lite_endpoint *ipc_rpmsg_default_endpoint;
@@ -69,13 +69,15 @@ int main(void)
 
     IPC_D0_Init(/* m0 callback */ ipc_m0_callback, /* lp callback*/ ipc_lp_callback);
 
+    printf("count: %d, RL_VRING_OVERHEAD:%d\r\n", RL_WORD_ALIGN_DOWN(XRAM_RINGBUF_SIZE - (uint32_t)RL_VRING_OVERHEAD) / 64, RL_VRING_OVERHEAD);
+
     ipc_rpmsg = rpmsg_lite_master_init((uintptr_t *)XRAM_RINGBUF_ADDR, XRAM_RINGBUF_SIZE, RL_PLATFORM_BL808_M0_LINK_ID, RL_NO_FLAGS);
     if (ipc_rpmsg == RL_NULL) {
         LOG_E("Failed to create rpmsg\r\n");
         while(1);
     }
 
-    LOG_D("rpmsg addr %lx, remaining %lx, total: %lx\r\n", ipc_rpmsg->sh_mem_base, ipc_rpmsg->sh_mem_remaining, ipc_rpmsg->sh_mem_total);
+    LOG_D("rpmsg addr %lx, remaining %ld, total: %ld\r\n", ipc_rpmsg->sh_mem_base, ipc_rpmsg->sh_mem_remaining, ipc_rpmsg->sh_mem_total);
 
     LOG_D("Waiting for RPMSG link up\r\n");
     while (RL_FALSE == rpmsg_lite_is_link_up(ipc_rpmsg)) {}
@@ -116,6 +118,8 @@ int main(void)
         }
       }
     }
+
+    while(1);
     /* we should never get here */
 
 }

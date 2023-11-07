@@ -26,9 +26,9 @@ MEMORY
     xip_memory  (rx)  : ORIGIN = 0x58000000, LENGTH = 32M
     ram_psram  (wxa)  : ORIGIN = 0x50000000, LENGTH = 64M
 
-    /* 16K fixed address used to ipc */
-
-    ocram_memory (rx)  : ORIGIN = 0x62020000 + 16K, LENGTH = 48K - 16K
+    /* 12K fixed address used to ipc */
+    /* RL_BUFFER_COUNT=64 * 2; RL_BUFFER_PAYLOAD_SIZE=48 */
+    ocram_memory (rx)  : ORIGIN = 0x62020000 + 12K, LENGTH = 48K - 12K
     nocache_ram_memory (!rx) : ORIGIN = 0x2202C000, LENGTH = 16K
 
     ram_wifi  (wxa)   : ORIGIN = 0x22030000, LENGTH = 160K - __EM_SIZE

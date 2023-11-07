@@ -16,7 +16,7 @@
 
 /* we have 16K XRAM so we can play a bit with the size here */
 #define XRAM_RINGBUF_ADDR 0x22020000
-#define XRAM_RINGBUF_SIZE 16*1024
+#define XRAM_RINGBUF_SIZE 12*1024
 
 /* timeout to wait for other core to clear a IPC interupt */
 #define IPC_TIMEOUT 100

@@ -1,6 +1,4 @@
 /*
- *
- *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #include <stdio.h>
@@ -53,16 +51,6 @@ static BL_Err_Type ipc_send_cmd(GLB_CORE_ID_Type targetcpu, uint32_t cmd)
 BL_Err_Type ipc_send_rpmsg(GLB_CORE_ID_Type cpu, uint32_t cmd)
 {
     return ipc_send_cmd(cpu, (IPC_MSG_RPMSG0 + cmd));
-}
-
-static void platform_global_isr_disable(void)
-{
-    __disable_irq();
-}
-
-static void platform_global_isr_enable(void)
-{
-    __enable_irq();
 }
 
 int32_t platform_init_interrupt(uint32_t vector_id, void *isr_data)
@@ -142,16 +130,16 @@ void platform_time_delay(uint32_t num_msec)
  */
 int32_t platform_interrupt_enable(uint32_t vector_id)
 {
-    RL_ASSERT(0 < disable_counter);
+    uintptr_t irq = csi_irq_save();
 
-    platform_global_isr_disable();
+    RL_ASSERT(0 < disable_counter);
     disable_counter--;
 
     if (disable_counter == 0) {
         LOG_D("RP: enable irq vector %ld\r\n", vector_id);
-        //ipc_mask_rpmsg(vector_id);
+        //ipc_unmask_rpmsg(vector_id);
     }
-    platform_global_isr_enable();
+    csi_irq_restore(irq);
     return ((int32_t)vector_id);
 }
 
@@ -167,17 +155,17 @@ int32_t platform_interrupt_enable(uint32_t vector_id)
  */
 int32_t platform_interrupt_disable(uint32_t vector_id)
 {
-    RL_ASSERT(0 <= disable_counter);
+    uintptr_t irq = csi_irq_save();
 
-    platform_global_isr_disable();
+    RL_ASSERT(0 <= disable_counter);
     /* virtqueues use the same NVIC vector
        if counter is set - the interrupts are disabled */
     if (disable_counter == 0) {
         LOG_D("RP: disable irq vector %ld\r\n", vector_id);
-        //ipc_unmask_rpmsg(vector_id);
+        //ipc_mask_rpmsg(vector_id);
     }
     disable_counter++;
-    platform_global_isr_enable();
+    csi_irq_restore(irq);
     return ((int32_t)vector_id);
 }
 

@@ -33,7 +33,7 @@ void ipc_m0_callback(uint32_t src)
         case IPC_MSG_RPMSG2:
         case IPC_MSG_RPMSG3:
             /* env_isr is in the porting layer of rpmsg-lite */
-            LOG_D("IPC: Got Notify for Vector %d\r\n", ffs(src) - IPC_MSG_RPMSG0 - 1);
+            //LOG_D("IPC: Got Notify for Vector %d\r\n", ffs(src) - IPC_MSG_RPMSG0 - 1);
             env_isr(ffs(src) - IPC_MSG_RPMSG0 - 1);
             break;
     }
@@ -53,7 +53,7 @@ void ipc_d0_callback(uint32_t src)
         case IPC_MSG_RPMSG2:
         case IPC_MSG_RPMSG3:
             /* env_isr is in the porting layer of rpmsg-lite */
-            LOG_D("IPC: Got Notify for Vector %d\r\n", ffs(src) - IPC_MSG_RPMSG0 - 1);
+            //LOG_D("IPC: Got Notify for Vector %d\r\n", ffs(src) - IPC_MSG_RPMSG0 - 1);
             env_isr(ffs(src) - IPC_MSG_RPMSG0 - 1);
             break;
     }
@@ -61,7 +61,7 @@ void ipc_d0_callback(uint32_t src)
 
 void ipc_lp_callback(uint32_t src)
 {
-    //LOG_D("IPC: LP Callback %x\r\n", src);
+    LOG_D("IPC: LP Callback %x\r\n", src);
     switch (ffs(src) - 1) {
         case IPC_MSG_PING:
             break;
@@ -83,8 +83,8 @@ void ipc_rpmsg_ns_callback(uint32_t new_ept, const char *new_ept_name, uint32_t 
     LOG_W("Endpoint: %s - endpoint %d - flags %d\r\n", new_ept_name, new_ept, flags);
 }
 
-char rx_msg[64];
-static char helloMsg[128];
+char rx_msg[64-16];
+static char helloMsg[64-16];
 
 int32_t rpmsg_bm_rx_cb(void *payload, uint32_t payload_len, uint32_t src, void *priv)
 {
@@ -102,33 +102,22 @@ void rpmsg_task(void *unused)
     ipc_rpmsg = rpmsg_lite_remote_init((uintptr_t *)XRAM_RINGBUF_ADDR, RL_PLATFORM_BL808_M0_LINK_ID, RL_NO_FLAGS);
     LOG_D("rpmsg addr %lx, remaining %lx, total: %lx\r\n", ipc_rpmsg->sh_mem_base, ipc_rpmsg->sh_mem_remaining, ipc_rpmsg->sh_mem_total);
 
-    LOG_D("Waiting for RPMSG link up\r\n");
-
-    while (0 == rpmsg_lite_is_link_up(ipc_rpmsg)) {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-
-    LOG_D("RPMSG link up\r\n");
-
     ipc_rpmsg_ns = rpmsg_ns_bind(ipc_rpmsg, ipc_rpmsg_ns_callback, NULL);
     if (ipc_rpmsg_ns == RL_NULL) {
         LOG_W("Failed to bind RPMSG NS\r\n");
         vTaskDelete(NULL);
         return;
     }
-    printf("%s:%d\r\n", __func__, __LINE__);
     LOG_D("RPMSG NS binded\r\n");
 
     ipc_rpmsg_queue = rpmsg_queue_create(ipc_rpmsg);
-    printf("%s:%d\r\n", __func__, __LINE__);
     if (ipc_rpmsg_queue == RL_NULL) {
         LOG_W("Failed to create RPMSG queue\r\n");
         vTaskDelete(NULL);
         return;
     }
 
-    printf("%s:%d\r\n", __func__, __LINE__);
-#if 1
+#if 0
     ipc_rpmsg_default_endpoint = rpmsg_lite_create_ept(ipc_rpmsg, 16, rpmsg_queue_rx_cb, ipc_rpmsg_queue);
 #else
     ipc_rpmsg_default_endpoint = rpmsg_lite_create_ept(ipc_rpmsg, 16, rpmsg_bm_rx_cb, NULL);
@@ -139,30 +128,36 @@ void rpmsg_task(void *unused)
         return;
     }
 
-    printf("%s:%d\r\n", __func__, __LINE__);
     LOG_D("RPMSG endpoint created\r\n");
+
+    LOG_D("Waiting for RPMSG link up\r\n");
+    while (RL_FALSE == rpmsg_lite_is_link_up(ipc_rpmsg)) {}
+    LOG_D("RPMSG link up\r\n");
+
+    if (rpmsg_ns_announce(ipc_rpmsg, ipc_rpmsg_default_endpoint, "rpmsg-test", RL_NS_CREATE) != RL_SUCCESS) {
+        LOG_W("Failed to announce RPMSG NS\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int ret;
+
     /* Wait Hello handshake message from Remote Core. */
-    int32_t ret = rpmsg_queue_recv(ipc_rpmsg, ipc_rpmsg_queue, (uint32_t *)&remote_addr, helloMsg, sizeof(helloMsg), &size,
+    ret = rpmsg_queue_recv(ipc_rpmsg, ipc_rpmsg_queue, (uint32_t *)&remote_addr, helloMsg, sizeof(helloMsg), &size,
                                    RL_BLOCK);
+    LOG_I("Got Hello message from remote core: %s %lx %d\r\n", helloMsg, remote_addr, size);
+
     if (ret != RL_SUCCESS) {
         LOG_D("rpmsg_queue_recv return %d\r\n", ret);
-    } else {
-        LOG_I("Got Hello message from remote core: %s %lx %d\r\n", helloMsg, remote_addr, size);
-        if (rpmsg_ns_announce(ipc_rpmsg, ipc_rpmsg_default_endpoint, "rpmsg-test", RL_NS_CREATE) != RL_SUCCESS) {
-            LOG_W("Failed to announce RPMSG NS\r\n");
-            vTaskDelete(NULL);
-            return;
-        }
+        vTaskDelete(NULL);
+        return;
     }
-    printf("%s:%d\r\n", __func__, __LINE__);
 
     while (1) {
         if (rpmsg_queue_recv(ipc_rpmsg, ipc_rpmsg_queue, (uint32_t *)&remote_addr, rx_msg, sizeof(rx_msg), &size, RL_BLOCK) == RL_SUCCESS) {
             //LOG_I("received %s - %lx!\r\n", rx_msg, remote_addr);
-            //strncpy(helloMsg, "Hello D0", sizeof(helloMsg));
-            //int ret = rpmsg_lite_send(ipc_rpmsg, ipc_rpmsg_default_endpoint, 0x10, (char *)helloMsg, sizeof(helloMsg), RL_BLOCK);
+            //rpmsg_lite_send(ipc_rpmsg, ipc_rpmsg_default_endpoint, remote_addr, (char *)rx_msg, size, RL_BLOCK);
         }
-        //vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     vTaskDelete(NULL);

@@ -76,7 +76,7 @@
 //! [2^n - 16]. Ensure the same value is defined on both sides of rpmsg
 //! communication. The default value is 496U.
 #ifndef RL_BUFFER_PAYLOAD_SIZE
-#define RL_BUFFER_PAYLOAD_SIZE (240U)
+#define RL_BUFFER_PAYLOAD_SIZE (48U)
 #endif
 
 //! @def RL_BUFFER_COUNT
@@ -88,7 +88,7 @@
 //! in rpmsg_config.h files for the master and the remote side, 4 buffers
 //! in total are created in the shared memory.
 #ifndef RL_BUFFER_COUNT
-#define RL_BUFFER_COUNT (16U)
+#define RL_BUFFER_COUNT (64U)
 #endif
 
 #else
@@ -126,7 +126,7 @@
 //! enabled/disabled.
 //! The default value is 0 (disabled).
 #ifndef RL_CLEAR_USED_BUFFERS
-#define RL_CLEAR_USED_BUFFERS (1)
+#define RL_CLEAR_USED_BUFFERS (0)
 #endif
 
 //! @def RL_USE_MCMGR_IPC_ISR_HANDLER
@@ -152,7 +152,7 @@
 //!
 //! Do not use in RPMsg-Lite to Linux configuration
 #ifndef RL_DEBUG_CHECK_BUFFERS
-#define RL_DEBUG_CHECK_BUFFERS (1)
+#define RL_DEBUG_CHECK_BUFFERS (0)
 #endif
 
 //! @def RL_ALLOW_CONSUMED_BUFFERS_NOTIFICATION
