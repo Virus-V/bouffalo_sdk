@@ -29,11 +29,14 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "timers.h"
+#include "semphr.h"
 
 #include "bl_fw_api.h"
 
 #include "bflb_irq.h"
 #include "bflb_uart.h"
+#include "bflb_rtc.h"
+#include "bflb_mtimer.h"
 
 #include "rfparam_adapter.h"
 
@@ -42,6 +45,7 @@
 
 #include "wl80211.h"
 #include "async_event.h"
+#include "bl616_pm.h"
 
 #include <lwip/etharp.h>
 #include <lwip/netdb.h>
@@ -62,6 +66,11 @@
 
 #include "wifi_mgmr.h"
 
+#include "sensor_i2c.h"
+#include "aht20.h"
+#include "bmp280.h"
+#include "bflb_gpio.h"
+
 struct bflb_device_s *gpio;
 
 /****************************************************************************
@@ -77,6 +86,7 @@ struct bflb_device_s *gpio;
  ****************************************************************************/
 
 static struct bflb_device_s *uart0;
+static SemaphoreHandle_t pds_sempr;
 
 extern void shell_init_with_task(struct bflb_device_s *shell);
 
@@ -105,6 +115,38 @@ void wifi_start_firmware_task(void *param)
     vTaskDelete(NULL);
 }
 
+void wifi_connect_task(void *param)
+{
+    struct wl80211_connect_params connect;
+    memset(&connect, 0, sizeof(struct wl80211_connect_params));
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    LOG_I("connect wifi ...\r\n");
+
+    strcpy((char *)connect.ssid, "Xiaomi_F7AA");
+    strcpy((char *)connect.password, "1124732794");
+
+    wl80211_sta_connect(&connect);
+
+    wifi_mgmr_sta_autoconnect_enable();
+
+    vTaskDelete(NULL);
+}
+
+static void force_pds_task(void *param)
+{
+    while(1) {
+        vTaskDelay(pdMS_TO_TICKS(30000));
+        wifi_mgmr_sta_autoconnect_disable();
+        wl80211_sta_disconnect();
+        printf("disconnect and sleep.\n");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        pm_hbn_mode_enter(PM_HBN_LEVEL_1, 32768*60*3);
+    }
+
+    vTaskDelete(NULL);
+}
+
 /* async event handler */
 static void async_event_handler(void *arg1, uint32_t arg2)
 {
@@ -126,6 +168,58 @@ static void async_event_loop_wake(void)
     configASSERT(xReturn == pdPASS);
 }
 
+/* Sensor reading task */
+static void sensor_read_task(void *param)
+{
+    float temp_aht20 = 0, humi = 0;
+    float temp_bmp280 = 0, pressure = 0;
+    int ret;
+
+    /* Initialize I2C with custom GPIO: SCL=GPIO10, SDA=GPIO11 */
+    printf("[SENSOR] Initializing I2C (SCL=GPIO10, SDA=GPIO11)...\r\n");
+    sensor_i2c_init(GPIO_PIN_10, GPIO_PIN_11);
+
+    /* Scan I2C bus */
+    //sensor_i2c_scan();
+
+    /* Initialize sensors */
+    bflb_mtimer_delay_ms(100);
+
+    ret = aht20_init();
+    if (ret != 0) {
+        printf("[SENSOR] AHT20 init failed!\r\n");
+    }
+
+    ret = bmp280_init();
+    if (ret != 0) {
+        printf("[SENSOR] BMP280 init failed!\r\n");
+    }
+
+    /* Wait for first AHT20 measurement to complete (needs at least 80ms) */
+    bflb_mtimer_delay_ms(100);
+
+    while (1) {
+        /* Read AHT20 - handles measurement timing internally */
+        ret = aht20_read(&temp_aht20, &humi);
+        if (ret == 0) {
+            printf("[AHT20] Temp: %.2f C, Humidity: %.2f %%\r\n", temp_aht20, humi);
+        } else {
+            printf("[AHT20] Read failed\r\n");
+            /* Trigger new measurement and wait */
+            aht20_start_measurement();
+            bflb_mtimer_delay_ms(100);
+        }
+
+        /* Read BMP280 */
+        ret = bmp280_read(&temp_bmp280, &pressure);
+        if (ret == 0) {
+            printf("[BMP280] Temp: %.2f C, Pressure: %.2f hPa\r\n", temp_bmp280, pressure);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
 int main(void)
 {
     board_init();
@@ -142,7 +236,12 @@ int main(void)
 
     async_event_init(async_event_loop_wake);
 
-    xTaskCreate(wifi_start_firmware_task, "wifi init", 1024, NULL, 10, NULL);
+    /* Create sensor reading task */
+    xTaskCreate(sensor_read_task, "sensor task", 1024, NULL, 5, NULL);
+
+    //xTaskCreate(wifi_start_firmware_task, "wifi init", 1024, NULL, 10, NULL);
+    //xTaskCreate(wifi_connect_task, "wifi conn", 1024, NULL, 10, NULL);
+    //xTaskCreate(force_pds_task, "pds task", 1024, NULL, 10, NULL);
 
     vTaskStartScheduler();
 
