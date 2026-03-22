@@ -12,6 +12,8 @@ sdk_library_add_sources(src/apps/http/http_client.c)
 sdk_library_add_sources_ifdef(CONFIG_HTTPD src/apps/http/httpd.c)
 sdk_library_add_sources_ifdef(CONFIG_DHCPD src/apps/dhcpd/dhcp_server_raw.c)
 sdk_library_add_sources_ifdef(CONFIG_MDNS src/apps/mdns/mdns_server.c)
+sdk_library_add_sources_ifdef(CONFIG_SNTP src/apps/sntp/sntp.c)
+
 sdk_add_include_directories_ifdef(CONFIG_DHCPD src/apps/dhcpd)
 sdk_add_include_directories_ifdef(CONFIG_MDNS src/apps/mdns)
 

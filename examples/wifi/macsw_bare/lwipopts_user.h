@@ -102,6 +102,9 @@ static inline void *_lwip_calloc(size_t count, size_t size)
 
 #endif
 
+extern void set_system_time(uint32_t);
+#define SNTP_SET_SYSTEM_TIME(sec)   set_system_time(sec)
+
 #define MEMP_NUM_NETBUF               32
 #define MEMP_NUM_NETCONN              8
 #define MEMP_NUM_UDP_PCB              8

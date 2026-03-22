@@ -52,6 +52,8 @@
 #include <lwip/netifapi.h>
 #include <lwip/sockets.h>
 #include <lwip/tcpip.h>
+
+#include "cJSON.h"
 /* clang-format on */
 
 #define DBG_TAG "MAIN"
@@ -73,6 +75,8 @@
 
 struct bflb_device_s *gpio;
 
+float temp_aht20 = 0, humi = 0;
+float temp_bmp280 = 0, pressure = 0;
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -135,14 +139,13 @@ void wifi_connect_task(void *param)
 
 static void force_pds_task(void *param)
 {
-    while(1) {
-        vTaskDelay(pdMS_TO_TICKS(30000));
-        wifi_mgmr_sta_autoconnect_disable();
-        wl80211_sta_disconnect();
-        printf("disconnect and sleep.\n");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        pm_hbn_mode_enter(PM_HBN_LEVEL_1, 32768*60*3);
-    }
+    xSemaphoreTake(pds_sempr, pdMS_TO_TICKS(30000));
+
+    wifi_mgmr_sta_autoconnect_disable();
+    wl80211_sta_disconnect();
+    printf("disconnect and sleep.\n");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    pm_hbn_mode_enter(PM_HBN_LEVEL_1, 32768 * 60 * 3);
 
     vTaskDelete(NULL);
 }
@@ -168,12 +171,88 @@ static void async_event_loop_wake(void)
     configASSERT(xReturn == pdPASS);
 }
 
+int send_udp_broadcast_socket(void)
+{
+    int sock;
+    struct sockaddr_in broadcast_addr;
+    int opt = 1;
+    int sent = -1;
+
+    // 1. 创建 UDP socket
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        printf("[UDP] socket create failed\r\n");
+        return sent;
+    }
+
+    // 2. 启用广播选项
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)) < 0) {
+        printf("[UDP] setsockopt failed\r\n");
+        close(sock);
+        return sent;
+    }
+
+    // 3. 设置广播地址和端口
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_port = htons(12345);
+    broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+    // 4. 创建 JSON 数据
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        printf("[UDP] cJSON_CreateObject failed\r\n");
+        close(sock);
+        return sent;
+    }
+
+    // 添加 AHT20 传感器数据
+    cJSON *aht20 = cJSON_CreateObject();
+    if (aht20 != NULL) {
+        cJSON_AddNumberToObject(aht20, "temperature", temp_aht20);
+        cJSON_AddNumberToObject(aht20, "humidity", humi);
+        cJSON_AddItemToObject(root, "aht20", aht20);
+    }
+
+    // 添加 BMP280 传感器数据
+    cJSON *bmp280 = cJSON_CreateObject();
+    if (bmp280 != NULL) {
+        cJSON_AddNumberToObject(bmp280, "temperature", temp_bmp280);
+        cJSON_AddNumberToObject(bmp280, "pressure", pressure);
+        cJSON_AddItemToObject(root, "bmp280", bmp280);
+    }
+
+    // 序列化为字符串
+    char *json_string = cJSON_PrintUnformatted(root);
+    if (json_string == NULL) {
+        printf("[UDP] cJSON_PrintUnformatted failed\r\n");
+        cJSON_Delete(root);
+        close(sock);
+        return sent;
+    }
+
+    printf("[UDP] Broadcasting: %s\r\n", json_string);
+
+    // 5. 发送数据
+    sent = sendto(sock, json_string, strlen(json_string), 0,
+                  (struct sockaddr *)&broadcast_addr, sizeof(broadcast_addr));
+    if (sent < 0) {
+        printf("[UDP] sendto failed\r\n");
+    }
+
+    // 6. 清理资源
+    cJSON_free(json_string);
+    cJSON_Delete(root);
+    close(sock);
+
+    return sent;
+}
+
 /* Sensor reading task */
 static void sensor_read_task(void *param)
 {
-    float temp_aht20 = 0, humi = 0;
-    float temp_bmp280 = 0, pressure = 0;
     int ret;
+    int succeed = 0;
 
     /* Initialize I2C with custom GPIO: SCL=GPIO10, SDA=GPIO11 */
     printf("[SENSOR] Initializing I2C (SCL=GPIO10, SDA=GPIO11)...\r\n");
@@ -183,7 +262,7 @@ static void sensor_read_task(void *param)
     //sensor_i2c_scan();
 
     /* Initialize sensors */
-    bflb_mtimer_delay_ms(100);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     ret = aht20_init();
     if (ret != 0) {
@@ -196,9 +275,9 @@ static void sensor_read_task(void *param)
     }
 
     /* Wait for first AHT20 measurement to complete (needs at least 80ms) */
-    bflb_mtimer_delay_ms(100);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    while (1) {
+    while (succeed < 10) {
         /* Read AHT20 - handles measurement timing internally */
         ret = aht20_read(&temp_aht20, &humi);
         if (ret == 0) {
@@ -207,7 +286,7 @@ static void sensor_read_task(void *param)
             printf("[AHT20] Read failed\r\n");
             /* Trigger new measurement and wait */
             aht20_start_measurement();
-            bflb_mtimer_delay_ms(100);
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
 
         /* Read BMP280 */
@@ -216,7 +295,31 @@ static void sensor_read_task(void *param)
             printf("[BMP280] Temp: %.2f C, Pressure: %.2f hPa\r\n", temp_bmp280, pressure);
         }
 
+        /* Send UDP broadcast with sensor data */
+        if (send_udp_broadcast_socket() > 0) {
+            succeed ++;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    xSemaphoreGive(pds_sempr);
+
+    vTaskDelete(NULL);
+}
+
+static void wifi_mgmr_event_handler(async_input_event_t ev, void *priv)
+{
+    static int sensor_task_inited = 0;
+    switch (ev->code) {
+        case CODE_WIFI_ON_GOT_IP: {
+            wl80211_printf("[APP] [EVT] %s, CODE_WIFI_ON_GOT_IP\r\n", __func__);
+            if (sensor_task_inited) {
+                break;
+            }
+            sensor_task_inited = 1;
+            xTaskCreate(sensor_read_task, "sensor task", 1024, NULL, 5, NULL);
+        } break;
     }
 }
 
@@ -236,12 +339,14 @@ int main(void)
 
     async_event_init(async_event_loop_wake);
 
-    /* Create sensor reading task */
-    xTaskCreate(sensor_read_task, "sensor task", 1024, NULL, 5, NULL);
+    /* user event callback */
+    async_register_event_filter(EV_WIFI, wifi_mgmr_event_handler, NULL);
 
-    //xTaskCreate(wifi_start_firmware_task, "wifi init", 1024, NULL, 10, NULL);
-    //xTaskCreate(wifi_connect_task, "wifi conn", 1024, NULL, 10, NULL);
-    //xTaskCreate(force_pds_task, "pds task", 1024, NULL, 10, NULL);
+    pds_sempr = xSemaphoreCreateBinary();
+
+    xTaskCreate(wifi_start_firmware_task, "wifi init", 1024, NULL, 10, NULL);
+    xTaskCreate(wifi_connect_task, "wifi conn", 1024, NULL, 10, NULL);
+    xTaskCreate(force_pds_task, "pds task", 1024, NULL, 10, NULL);
 
     vTaskStartScheduler();
 
@@ -413,21 +518,20 @@ static void wifi_inject_frame_test_cmd(int argc, char **argv)
      * Note: In real use, you would construct a proper 802.11 frame with
      * correct frame control, duration, addresses, sequence number, etc.
      */
-    uint8_t test_frame[] = {
-        /* Frame Control (2 bytes) - Management frame */
-        0x00, 0x00,
-        /* Duration (2 bytes) */
-        0x00, 0x00,
-        /* Destination Address (6 bytes) - broadcast */
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        /* Source Address (6 bytes) - test MAC */
-        0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
-        /* BSSID (6 bytes) - test MAC */
-        0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
-        /* Sequence Control (2 bytes) */
-        0x00, 0x00,
-        /* Frame Body (test payload) */
-        0xDE, 0xAD, 0xBE, 0xEF
+    uint8_t test_frame[] = { /* Frame Control (2 bytes) - Management frame */
+                             0x00, 0x00,
+                             /* Duration (2 bytes) */
+                             0x00, 0x00,
+                             /* Destination Address (6 bytes) - broadcast */
+                             0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                             /* Source Address (6 bytes) - test MAC */
+                             0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+                             /* BSSID (6 bytes) - test MAC */
+                             0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+                             /* Sequence Control (2 bytes) */
+                             0x00, 0x00,
+                             /* Frame Body (test payload) */
+                             0xDE, 0xAD, 0xBE, 0xEF
     };
 
     /* Set up injection parameters */
